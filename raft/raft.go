@@ -199,12 +199,12 @@ func (r *Raft) tick() {
 
 	if r.heartbeatElapsed >= r.heartbeatTimeout {
 		r.heartbeatElapsed = 0
-		r.visitAll(func(id uint64) {
-			if id == r.id {
-				return
-			}
-			r.msgs = append(r.msgs, pb.Message{From: r.id, To: id, Term: r.Term, MsgType: pb.MessageType_MsgHeartbeat})
-		})
+		r.Step(pb.Message{From: r.id, MsgType: pb.MessageType_MsgHeartbeat})
+	}
+
+	if r.electionElapsed >= r.electionTimeout {
+		r.electionElapsed = 0
+		r.Step(pb.Message{From: r.id, MsgType: pb.MessageType_MsgHup})
 	}
 }
 
@@ -287,6 +287,13 @@ func (r *Raft) stepLeader(m pb.Message) {
 			r.msgs = append(r.msgs, pb.Message{From: m.To, To: m.From, Term: m.Term, MsgType: pb.MessageType_MsgRequestVoteResponse})
 			r.becomeFollower(m.Term, m.From)
 		}
+	case pb.MessageType_MsgHeartbeat:
+		r.visitAll(func(id uint64) {
+			if id == r.id {
+				return
+			}
+			r.msgs = append(r.msgs, pb.Message{From: r.id, To: id, Term: r.Term, MsgType: pb.MessageType_MsgHeartbeat})
+		})
 	}
 }
 
@@ -317,12 +324,11 @@ func (r *Raft) stepCandidate(m pb.Message) {
 func (r *Raft) stepFollower(m pb.Message) {
 	switch m.MsgType {
 	case pb.MessageType_MsgHup:
-
 		r.becomeCandidate()
 		r.visitAll(func(id uint64) {
 			if id == r.id {
 				r.Vote = r.id
-				r.msgs = append(r.msgs, pb.Message{From: r.id, To: id, Term: r.Term, MsgType: pb.MessageType_MsgRequestVoteResponse})
+				r.votes[r.id] = true
 				return
 			}
 			r.msgs = append(r.msgs, pb.Message{From: r.id, To: id, Term: r.Term, MsgType: pb.MessageType_MsgRequestVote})

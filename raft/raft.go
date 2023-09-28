@@ -194,6 +194,18 @@ func (r *Raft) sendHeartbeat(to uint64) {
 // tick advances the internal logical clock by a single tick.
 func (r *Raft) tick() {
 	// Your Code Here (2A).
+	r.electionElapsed++
+	r.heartbeatElapsed++
+
+	if r.heartbeatElapsed >= r.heartbeatTimeout {
+		r.heartbeatElapsed = 0
+		r.visitAll(func(id uint64) {
+			if id == r.id {
+				return
+			}
+			r.msgs = append(r.msgs, pb.Message{From: r.id, To: id, Term: r.Term, MsgType: pb.MessageType_MsgHeartbeat})
+		})
+	}
 }
 
 // becomeFollower transform this peer's state to Follower
@@ -210,6 +222,7 @@ func (r *Raft) becomeCandidate() {
 	r.State = StateCandidate
 	r.Lead = None
 	r.Vote = None
+	r.Term += 1
 	for id := range r.votes {
 		r.votes[id] = false
 	}
@@ -220,13 +233,16 @@ func (r *Raft) becomeLeader() {
 	// Your Code Here (2A).
 	// NOTE: Leader should propose a noop entry on its term
 	r.State = StateLeader
-	r.Lead = r.Term
+	r.Lead = r.id
 }
 
 // Step the entrance of handle message, see `MessageType`
 // on `eraftpb.proto` for what msgs should be handled
 func (r *Raft) Step(m pb.Message) error {
 	// Your Code Here (2A).
+	if m.Term > r.Term {
+		r.becomeFollower(m.Term, m.From)
+	}
 	switch r.State {
 	case StateFollower:
 		r.stepFollower(m)
@@ -236,6 +252,31 @@ func (r *Raft) Step(m pb.Message) error {
 		r.stepLeader(m)
 	}
 	return nil
+}
+
+// handleAppendEntries handle AppendEntries RPC request
+func (r *Raft) handleAppendEntries(m pb.Message) {
+	// Your Code Here (2A).
+}
+
+// handleHeartbeat handle Heartbeat RPC request
+func (r *Raft) handleHeartbeat(m pb.Message) {
+	// Your Code Here (2A).
+}
+
+// handleSnapshot handle Snapshot RPC request
+func (r *Raft) handleSnapshot(m pb.Message) {
+	// Your Code Here (2C).
+}
+
+// addNode add a new node to raft group
+func (r *Raft) addNode(id uint64) {
+	// Your Code Here (3A).
+}
+
+// removeNode remove a node from raft group
+func (r *Raft) removeNode(id uint64) {
+	// Your Code Here (3A).
 }
 
 func (r *Raft) stepLeader(m pb.Message) {
@@ -276,21 +317,16 @@ func (r *Raft) stepCandidate(m pb.Message) {
 func (r *Raft) stepFollower(m pb.Message) {
 	switch m.MsgType {
 	case pb.MessageType_MsgHup:
-		r.Term += 1
+
 		r.becomeCandidate()
-		// send message
-		ids := make([]uint64, 0, len(r.Prs))
-		for id := range r.Prs {
-			ids = append(ids, id)
-		}
-		for _, id := range ids {
+		r.visitAll(func(id uint64) {
 			if id == r.id {
 				r.Vote = r.id
 				r.msgs = append(r.msgs, pb.Message{From: r.id, To: id, Term: r.Term, MsgType: pb.MessageType_MsgRequestVoteResponse})
-				continue
+				return
 			}
 			r.msgs = append(r.msgs, pb.Message{From: r.id, To: id, Term: r.Term, MsgType: pb.MessageType_MsgRequestVote})
-		}
+		})
 	case pb.MessageType_MsgRequestVoteResponse:
 	case pb.MessageType_MsgRequestVote:
 		if m.Term > r.Term {
@@ -301,27 +337,8 @@ func (r *Raft) stepFollower(m pb.Message) {
 	}
 }
 
-// handleAppendEntries handle AppendEntries RPC request
-func (r *Raft) handleAppendEntries(m pb.Message) {
-	// Your Code Here (2A).
-}
-
-// handleHeartbeat handle Heartbeat RPC request
-func (r *Raft) handleHeartbeat(m pb.Message) {
-	// Your Code Here (2A).
-}
-
-// handleSnapshot handle Snapshot RPC request
-func (r *Raft) handleSnapshot(m pb.Message) {
-	// Your Code Here (2C).
-}
-
-// addNode add a new node to raft group
-func (r *Raft) addNode(id uint64) {
-	// Your Code Here (3A).
-}
-
-// removeNode remove a node from raft group
-func (r *Raft) removeNode(id uint64) {
-	// Your Code Here (3A).
+func (r *Raft) visitAll(f func(id uint64)) {
+	for id := range r.Prs {
+		f(id)
+	}
 }

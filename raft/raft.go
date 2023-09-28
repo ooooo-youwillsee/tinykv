@@ -299,6 +299,16 @@ func (r *Raft) stepLeader(m pb.Message) {
 
 func (r *Raft) stepCandidate(m pb.Message) {
 	switch m.MsgType {
+	case pb.MessageType_MsgHup:
+		r.becomeCandidate()
+		r.visitAll(func(id uint64) {
+			if id == r.id {
+				r.Vote = r.id
+				r.votes[r.id] = true
+				return
+			}
+			r.msgs = append(r.msgs, pb.Message{From: r.id, To: id, Term: r.Term, MsgType: pb.MessageType_MsgRequestVote})
+		})
 	case pb.MessageType_MsgRequestVoteResponse:
 		if !m.Reject {
 			r.votes[m.From] = true

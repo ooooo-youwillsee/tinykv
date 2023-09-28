@@ -16,7 +16,6 @@ package raft
 
 import (
 	"errors"
-
 	pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
 )
 
@@ -200,6 +199,9 @@ func (r *Raft) tick() {
 // becomeFollower transform this peer's state to Follower
 func (r *Raft) becomeFollower(term uint64, lead uint64) {
 	// Your Code Here (2A).
+	r.State = StateFollower
+	r.Term = term
+	r.Lead = lead
 }
 
 // becomeCandidate transform this peer's state to candidate
@@ -207,6 +209,10 @@ func (r *Raft) becomeCandidate() {
 	// Your Code Here (2A).
 	r.State = StateCandidate
 	r.Lead = None
+	r.Vote = None
+	for id := range r.votes {
+		r.votes[id] = false
+	}
 }
 
 // becomeLeader transform this peer's state to leader
@@ -227,8 +233,20 @@ func (r *Raft) Step(m pb.Message) error {
 	case StateCandidate:
 		r.stepCandidate(m)
 	case StateLeader:
+		r.stepLeader(m)
 	}
 	return nil
+}
+
+func (r *Raft) stepLeader(m pb.Message) {
+	switch m.MsgType {
+	case pb.MessageType_MsgRequestVote:
+		if m.Term > r.Term {
+			r.Vote = m.From
+			r.msgs = append(r.msgs, pb.Message{From: m.To, To: m.From, Term: m.Term, MsgType: pb.MessageType_MsgRequestVoteResponse})
+			r.becomeFollower(m.Term, m.From)
+		}
+	}
 }
 
 func (r *Raft) stepCandidate(m pb.Message) {
@@ -272,7 +290,7 @@ func (r *Raft) stepFollower(m pb.Message) {
 		if m.Term > r.Term {
 			r.Vote = m.From
 			r.msgs = append(r.msgs, pb.Message{From: m.To, To: m.From, Term: m.Term, MsgType: pb.MessageType_MsgRequestVoteResponse})
-			r.becomeFollower(m.Term, m.Term)
+			r.becomeFollower(m.Term, m.From)
 		}
 	}
 }

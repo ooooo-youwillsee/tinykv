@@ -165,7 +165,19 @@ func newRaft(c *Config) *Raft {
 		panic(err.Error())
 	}
 	// Your Code Here (2A).
-	return nil
+	prs := make(map[uint64]*Progress)
+	for _, peer := range c.peers {
+		prs[peer] = &Progress{}
+	}
+
+	r := &Raft{
+		id:               c.ID,
+		heartbeatTimeout: c.HeartbeatTick,
+		electionTimeout:  c.ElectionTick,
+		Prs:              prs,
+		votes:            make(map[uint64]bool),
+	}
+	return r
 }
 
 // sendAppend sends an append RPC with new entries (if any) and the
@@ -193,12 +205,16 @@ func (r *Raft) becomeFollower(term uint64, lead uint64) {
 // becomeCandidate transform this peer's state to candidate
 func (r *Raft) becomeCandidate() {
 	// Your Code Here (2A).
+	r.State = StateCandidate
+	r.Lead = None
 }
 
 // becomeLeader transform this peer's state to leader
 func (r *Raft) becomeLeader() {
 	// Your Code Here (2A).
 	// NOTE: Leader should propose a noop entry on its term
+	r.State = StateLeader
+	r.Lead = r.Term
 }
 
 // Step the entrance of handle message, see `MessageType`
@@ -207,10 +223,58 @@ func (r *Raft) Step(m pb.Message) error {
 	// Your Code Here (2A).
 	switch r.State {
 	case StateFollower:
+		r.stepFollower(m)
 	case StateCandidate:
+		r.stepCandidate(m)
 	case StateLeader:
 	}
 	return nil
+}
+
+func (r *Raft) stepCandidate(m pb.Message) {
+	switch m.MsgType {
+	case pb.MessageType_MsgRequestVoteResponse:
+		if !m.Reject {
+			r.votes[m.From] = true
+			voteCnt := 0
+			for _, vote := range r.votes {
+				if vote {
+					voteCnt += 1
+				}
+			}
+			if voteCnt > len(r.Prs)/2 {
+				r.becomeLeader()
+			}
+		}
+	}
+}
+
+func (r *Raft) stepFollower(m pb.Message) {
+	switch m.MsgType {
+	case pb.MessageType_MsgHup:
+		r.Term += 1
+		r.becomeCandidate()
+		// send message
+		ids := make([]uint64, 0, len(r.Prs))
+		for id := range r.Prs {
+			ids = append(ids, id)
+		}
+		for _, id := range ids {
+			if id == r.id {
+				r.Vote = r.id
+				r.msgs = append(r.msgs, pb.Message{From: r.id, To: id, Term: r.Term, MsgType: pb.MessageType_MsgRequestVoteResponse})
+				continue
+			}
+			r.msgs = append(r.msgs, pb.Message{From: r.id, To: id, Term: r.Term, MsgType: pb.MessageType_MsgRequestVote})
+		}
+	case pb.MessageType_MsgRequestVoteResponse:
+	case pb.MessageType_MsgRequestVote:
+		if m.Term > r.Term {
+			r.Vote = m.From
+			r.msgs = append(r.msgs, pb.Message{From: m.To, To: m.From, Term: m.Term, MsgType: pb.MessageType_MsgRequestVoteResponse})
+			r.becomeFollower(m.Term, m.Term)
+		}
+	}
 }
 
 // handleAppendEntries handle AppendEntries RPC request

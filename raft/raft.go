@@ -264,6 +264,12 @@ func (r *Raft) stepCandidate(m pb.Message) {
 				r.becomeLeader()
 			}
 		}
+	case pb.MessageType_MsgRequestVote:
+		if m.Term > r.Term {
+			r.Vote = m.From
+			r.msgs = append(r.msgs, pb.Message{From: m.To, To: m.From, Term: m.Term, MsgType: pb.MessageType_MsgRequestVoteResponse})
+			r.becomeFollower(m.Term, m.From)
+		}
 	}
 }
 
